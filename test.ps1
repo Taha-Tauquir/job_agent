@@ -17,7 +17,7 @@
     Existing files at those paths are backed up first as <name>.bak.
 
 .PARAMETER ProjectRoot
-    Root of your job-agent project. Defaults to the current directory.
+    Root of your job-agent project. Defaults to the current directory
 
 .EXAMPLE
     cd C:\Users\Hp\Desktop\ProjectCV\job-agent
