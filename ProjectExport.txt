@@ -1,0 +1,2251 @@
+﻿PROJECT EXPORT
+Source: C:\Users\Hp\Desktop\ProjectCV\job-agent
+Generated: 2026-09-06 15:37:49
+Total files: 39
+================================================================================
+
+--------------------------------------------------------------------------------
+FILE 1 of 39: .env
+Size: 0.62 KB
+--------------------------------------------------------------------------------
+REED_API_KEY=
+ADZUNA_APP_ID=
+ADZUNA_APP_KEY=
+ADZUNA_COUNTRY=gb
+JOOBLE_API_KEY=
+JOOBLE_BASE_URL=https://uk.jooble.org
+
+# Public boards used to verify the connector pipeline. Add more employer boards here.
+GREENHOUSE_BOARDS=cloudflare|Cloudflare
+LEVER_SITES=palantir|Palantir
+ASHBY_BOARDS=ashby|Ashby
+SMARTRECRUITERS_COMPANIES=smartrecruiters|SmartRecruiters
+
+# Fixed LinkedIn filters; the connector replaces the keyword and paginates start.
+LINKEDIN_PUBLIC_SEARCH_URL=https://www.linkedin.com/jobs-guest/jobs/api/seeMoreJobPostings/search?keywords=Java&location=United%2BKingdom&geoId=101165590&f_TPR=r2592000&activeFilter=f_TPR&start=0
+
+
+--------------------------------------------------------------------------------
+FILE 2 of 39: .env.example
+Size: 0.46 KB
+--------------------------------------------------------------------------------
+# API-key sources
+REED_API_KEY=
+ADZUNA_APP_ID=
+ADZUNA_APP_KEY=
+ADZUNA_COUNTRY=gb
+JOOBLE_API_KEY=
+JOOBLE_BASE_URL=https://uk.jooble.org
+
+# Comma-separated public company boards. Use board_id|Display Name when wanted.
+GREENHOUSE_BOARDS=
+LEVER_SITES=
+ASHBY_BOARDS=
+SMARTRECRUITERS_COMPANIES=
+
+# Experimental: parses public HTML batches returned by this search URL.
+# It does not bypass sign-in walls, challenges, rate limits, or result caps.
+LINKEDIN_PUBLIC_SEARCH_URL=
+
+
+--------------------------------------------------------------------------------
+FILE 3 of 39: .gitignore
+Size: 0.07 KB
+--------------------------------------------------------------------------------
+.env
+.pytest_cache/
+__pycache__/
+*.py[cod]
+.venv/
+data/*.db
+logs/*.log
+
+
+
+--------------------------------------------------------------------------------
+FILE 4 of 39: pyproject.toml
+Size: 0.57 KB
+--------------------------------------------------------------------------------
+[build-system]
+requires = ["setuptools>=75"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "personal-job-agent"
+version = "0.1.0"
+description = "Local job search API with pluggable source connectors."
+requires-python = ">=3.11"
+dependencies = [
+    "fastapi>=0.116,<1",
+    "httpx>=0.28,<1",
+    "lxml>=5,<7",
+    "pydantic>=2.12,<3",
+    "python-dotenv>=1.0,<2",
+    "uvicorn>=0.35,<1",
+]
+
+[project.optional-dependencies]
+test = ["pytest>=8.4,<9"]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]
+
+
+--------------------------------------------------------------------------------
+FILE 5 of 39: README.md
+Size: 1.8 KB
+--------------------------------------------------------------------------------
+# Personal Job Agent
+
+This first implementation provides a local FastAPI service and normalized source
+connectors for Reed, Adzuna, Jooble, Greenhouse, Lever, Ashby, and
+SmartRecruiters.
+
+An experimental `linkedin-public` connector can parse public HTML batches from
+a configured LinkedIn search URL. The guest fragment URL supports offset-based
+pagination. It is not a supported LinkedIn API, cannot guarantee every result,
+and intentionally stops on HTTP errors or a sign-in wall rather than attempting
+to bypass access controls. Review LinkedIn's terms before enabling recurring use.
+
+## Setup
+
+```powershell
+cd C:\Users\Hp\Desktop\ProjectCV\job-agent
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1
+python -m pip install -e ".[test]"
+Copy-Item .env.example .env
+```
+
+Add API keys and company board identifiers to `.env`. Public boards are written
+as comma-separated IDs, optionally followed by `|Display Name`:
+
+```dotenv
+GREENHOUSE_BOARDS=cloudflare|Cloudflare
+LEVER_SITES=palantir|Palantir
+ASHBY_BOARDS=ashby|Ashby
+SMARTRECRUITERS_COMPANIES=smartrecruiters|SmartRecruiters
+```
+
+## Run tests
+
+```powershell
+python -m pytest
+python scripts/live_smoke.py
+```
+
+The live smoke test always checks sample public ATS boards. Reed, Adzuna, and
+Jooble are added when their environment variables are configured.
+
+## Start the local API
+
+```powershell
+uvicorn job_agent.api:app --app-dir src --reload
+```
+
+Open `http://127.0.0.1:8000/docs` for the interactive API documentation.
+
+Example request:
+
+```json
+{
+  "keywords": ["java", "spring"],
+  "location": "London",
+  "country": "gb",
+  "page_size": 20,
+  "max_pages_per_source": 5
+}
+```
+
+`max_pages_per_source` limits a foreground test. Set it to `null` to follow a
+source until it reports no next page. Normal background runs should still obey
+each provider's documented quotas and rate limits.
+
+
+--------------------------------------------------------------------------------
+FILE 6 of 39: scripts\live_smoke.py
+Size: 2.22 KB
+--------------------------------------------------------------------------------
+from __future__ import annotations
+
+import asyncio
+import os
+import sys
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT / "src"))
+
+from job_agent.connectors import (  # noqa: E402
+    AdzunaConnector,
+    AshbyConnector,
+    GreenhouseConnector,
+    JoobleConnector,
+    LeverConnector,
+    ReedConnector,
+    SmartRecruitersConnector,
+)
+from job_agent.models import SearchQuery  # noqa: E402
+
+
+async def main() -> int:
+    connectors = [
+        GreenhouseConnector("cloudflare", "Cloudflare", include_content=False),
+        LeverConnector("palantir", "Palantir"),
+        AshbyConnector("ashby", "Ashby"),
+        SmartRecruitersConnector("smartrecruiters", "SmartRecruiters"),
+    ]
+    if os.getenv("REED_API_KEY"):
+        connectors.append(ReedConnector(os.environ["REED_API_KEY"]))
+    if os.getenv("ADZUNA_APP_ID") and os.getenv("ADZUNA_APP_KEY"):
+        connectors.append(
+            AdzunaConnector(
+                os.environ["ADZUNA_APP_ID"],
+                os.environ["ADZUNA_APP_KEY"],
+                os.getenv("ADZUNA_COUNTRY", "gb"),
+            )
+        )
+    if os.getenv("JOOBLE_API_KEY"):
+        connectors.append(
+            JoobleConnector(
+                os.environ["JOOBLE_API_KEY"],
+                os.getenv("JOOBLE_BASE_URL", "https://uk.jooble.org"),
+            )
+        )
+
+    failed = False
+    query = SearchQuery(page_size=2)
+    try:
+        for connector in connectors:
+            try:
+                page = await connector.search(query)
+                sample = page.jobs[0] if page.jobs else None
+                print(f"{connector.source}: {len(page.jobs)} jobs returned")
+                if sample:
+                    print(f"  {sample.title} | {sample.company} | {sample.location}")
+                    print(f"  {sample.job_url}")
+                else:
+                    failed = True
+                    print("  ERROR: source returned no jobs")
+            except Exception as exc:
+                failed = True
+                print(f"{connector.source}: ERROR: {exc}")
+    finally:
+        await asyncio.gather(*(connector.close() for connector in connectors))
+    return 1 if failed else 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(asyncio.run(main()))
+
+
+
+--------------------------------------------------------------------------------
+FILE 7 of 39: src\job_agent\__init__.py
+Size: 0.15 KB
+--------------------------------------------------------------------------------
+"""Personal job agent package."""
+
+from .models import NormalizedJob, SearchPage, SearchQuery
+
+__all__ = ["NormalizedJob", "SearchPage", "SearchQuery"]
+
+
+
+--------------------------------------------------------------------------------
+FILE 8 of 39: src\job_agent\api.py
+Size: 1.3 KB
+--------------------------------------------------------------------------------
+from __future__ import annotations
+
+from contextlib import asynccontextmanager
+
+from fastapi import FastAPI
+
+from .models import SearchQuery, SearchRequest, SearchResponse
+from .registry import build_connectors_from_env
+from .service import SearchService
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    connectors = build_connectors_from_env()
+    app.state.search_service = SearchService(connectors)
+    yield
+    await app.state.search_service.close()
+
+
+# Environment-backed source configuration is loaded by the application lifespan.
+app = FastAPI(title="Personal Job Agent API", version="0.2.0", lifespan=lifespan)
+
+
+@app.get("/api/health")
+async def health() -> dict[str, object]:
+    return {"status": "ok", "configured_sources": list(app.state.search_service.connectors)}
+
+
+@app.get("/api/sources")
+async def sources() -> dict[str, list[str]]:
+    return {"sources": list(app.state.search_service.connectors)}
+
+
+@app.post("/api/search", response_model=SearchResponse)
+async def search(request: SearchRequest) -> SearchResponse:
+    query = SearchQuery(**request.model_dump(exclude={"sources", "max_pages_per_source"}))
+    results = await app.state.search_service.search_all(
+        query,
+        request.sources,
+        request.max_pages_per_source,
+    )
+    return SearchResponse(query=query, results=results)
+
+
+--------------------------------------------------------------------------------
+FILE 9 of 39: src\job_agent\connectors\__init__.py
+Size: 0.53 KB
+--------------------------------------------------------------------------------
+from .adzuna import AdzunaConnector
+from .ashby import AshbyConnector
+from .greenhouse import GreenhouseConnector
+from .jooble import JoobleConnector
+from .lever import LeverConnector
+from .linkedin_public import LinkedInPublicConnector
+from .reed import ReedConnector
+from .smartrecruiters import SmartRecruitersConnector
+
+__all__ = [
+    "AdzunaConnector",
+    "AshbyConnector",
+    "GreenhouseConnector",
+    "JoobleConnector",
+    "LeverConnector",
+    "LinkedInPublicConnector",
+    "ReedConnector",
+    "SmartRecruitersConnector",
+]
+
+
+--------------------------------------------------------------------------------
+FILE 10 of 39: src\job_agent\connectors\adzuna.py
+Size: 3 KB
+--------------------------------------------------------------------------------
+from __future__ import annotations
+
+import httpx
+
+from job_agent.models import NormalizedJob, SearchPage, SearchQuery
+from job_agent.utils import as_float, infer_remote, parse_datetime, strip_html
+
+from .base import BaseConnector
+
+
+class AdzunaConnector(BaseConnector):
+    source = "adzuna"
+
+    def __init__(
+        self,
+        app_id: str,
+        app_key: str,
+        country: str = "gb",
+        client: httpx.AsyncClient | None = None,
+    ) -> None:
+        if not app_id or not app_key:
+            raise ValueError("Adzuna app_id and app_key are required")
+        super().__init__(client)
+        self.app_id = app_id
+        self.app_key = app_key
+        self.country = country.lower()
+
+    async def search(self, query: SearchQuery, cursor: str | None = None) -> SearchPage:
+        page = int(cursor or 1)
+        country = query.country or self.country
+        url = f"https://api.adzuna.com/v1/api/jobs/{country}/search/{page}"
+        params: dict[str, object] = {
+            "app_id": self.app_id,
+            "app_key": self.app_key,
+            "results_per_page": query.page_size,
+            "what": query.keyword_text,
+        }
+        if query.location:
+            params["where"] = query.location
+        if query.minimum_salary is not None:
+            params["salary_min"] = query.minimum_salary
+        if query.maximum_salary is not None:
+            params["salary_max"] = query.maximum_salary
+        if query.posted_within_days is not None:
+            params["max_days_old"] = query.posted_within_days
+
+        payload = await self._json_request("GET", url, params=params)
+        rows = payload.get("results", [])
+        total = int(payload.get("count", len(rows)))
+        jobs = [self._normalize(row) for row in rows]
+        next_cursor = str(page + 1) if rows and page * query.page_size < total else None
+        return SearchPage(jobs=jobs, next_cursor=next_cursor, total_available=total)
+
+    def _normalize(self, row: dict) -> NormalizedJob:
+        company = row.get("company") or {}
+        location_data = row.get("location") or {}
+        category = row.get("category") or {}
+        location = location_data.get("display_name")
+        return NormalizedJob(
+            source=self.source,
+            source_job_id=str(row.get("id")),
+            title=row.get("title") or "Untitled job",
+            company=company.get("display_name") or "Unknown employer",
+            location=location,
+            description=strip_html(row.get("description")),
+            salary_min=as_float(row.get("salary_min")),
+            salary_max=as_float(row.get("salary_max")),
+            salary_currency=row.get("salary_currency") or ("GBP" if self.country == "gb" else None),
+            employment_type=row.get("contract_time") or row.get("contract_type"),
+            remote=infer_remote(location),
+            posted_at=parse_datetime(row.get("created")),
+            job_url=row.get("redirect_url"),
+            apply_url=row.get("redirect_url"),
+            raw={**row, "normalized_category": category.get("label")},
+        )
+
+
+
+--------------------------------------------------------------------------------
+FILE 11 of 39: src\job_agent\connectors\ashby.py
+Size: 2.47 KB
+--------------------------------------------------------------------------------
+from __future__ import annotations
+
+from urllib.parse import quote
+
+import httpx
+
+from job_agent.models import NormalizedJob, SearchPage, SearchQuery
+from job_agent.utils import as_float, infer_remote, job_matches_query, parse_datetime
+
+from .base import BaseConnector
+
+
+class AshbyConnector(BaseConnector):
+    def __init__(
+        self,
+        job_board_name: str,
+        company_name: str | None = None,
+        client: httpx.AsyncClient | None = None,
+    ) -> None:
+        if not job_board_name:
+            raise ValueError("Ashby job board name is required")
+        super().__init__(client)
+        self.job_board_name = job_board_name
+        self.company_name = company_name or job_board_name.replace("-", " ").title()
+        self.source = f"ashby:{job_board_name}"
+
+    async def search(self, query: SearchQuery, cursor: str | None = None) -> SearchPage:
+        del cursor
+        board = quote(self.job_board_name, safe="")
+        payload = await self._json_request(
+            "GET",
+            f"https://api.ashbyhq.com/posting-api/job-board/{board}",
+            params={"includeCompensation": "true"},
+        )
+        jobs = [self._normalize(row) for row in payload.get("jobs", []) if row.get("isListed", True)]
+        jobs = [job for job in jobs if job_matches_query(job, query)]
+        return SearchPage(jobs=jobs, total_available=len(payload.get("jobs", [])))
+
+    def _normalize(self, row: dict) -> NormalizedJob:
+        compensation = row.get("compensation") or {}
+        location = row.get("location")
+        return NormalizedJob(
+            source=self.source,
+            source_job_id=str(row.get("id")),
+            title=row.get("title") or "Untitled job",
+            company=self.company_name,
+            location=location,
+            description=row.get("descriptionPlain"),
+            salary_min=as_float(compensation.get("minValue") or compensation.get("min")),
+            salary_max=as_float(compensation.get("maxValue") or compensation.get("max")),
+            salary_currency=compensation.get("currencyCode") or compensation.get("currency"),
+            salary_interval=compensation.get("interval"),
+            salary_text=compensation.get("summary"),
+            employment_type=row.get("employmentType"),
+            remote=infer_remote(location, row.get("isRemote")),
+            posted_at=parse_datetime(row.get("publishedAt")),
+            job_url=row.get("jobUrl"),
+            apply_url=row.get("applyUrl") or row.get("jobUrl"),
+            raw=row,
+        )
+
+
+
+--------------------------------------------------------------------------------
+FILE 12 of 39: src\job_agent\connectors\base.py
+Size: 1.41 KB
+--------------------------------------------------------------------------------
+from __future__ import annotations
+
+from abc import ABC, abstractmethod
+from typing import Any
+
+import httpx
+
+from job_agent.errors import ConnectorError
+from job_agent.models import SearchPage, SearchQuery
+
+
+class BaseConnector(ABC):
+    source: str
+
+    def __init__(self, client: httpx.AsyncClient | None = None) -> None:
+        self._owns_client = client is None
+        self.client = client or httpx.AsyncClient(
+            timeout=httpx.Timeout(30),
+            follow_redirects=True,
+            headers={"User-Agent": "PersonalJobAgent/0.1"},
+        )
+
+    @abstractmethod
+    async def search(self, query: SearchQuery, cursor: str | None = None) -> SearchPage:
+        raise NotImplementedError
+
+    async def close(self) -> None:
+        if self._owns_client:
+            await self.client.aclose()
+
+    async def _json_request(self, method: str, url: str, **kwargs: Any) -> Any:
+        try:
+            response = await self.client.request(method, url, **kwargs)
+            response.raise_for_status()
+            return response.json()
+        except httpx.HTTPStatusError as exc:
+            detail = exc.response.text[:300].replace("\n", " ")
+            raise ConnectorError(
+                f"{self.source} returned HTTP {exc.response.status_code}: {detail}"
+            ) from exc
+        except (httpx.HTTPError, ValueError) as exc:
+            raise ConnectorError(f"{self.source} request failed: {exc}") from exc
+
+
+
+--------------------------------------------------------------------------------
+FILE 13 of 39: src\job_agent\connectors\greenhouse.py
+Size: 2.06 KB
+--------------------------------------------------------------------------------
+from __future__ import annotations
+
+from urllib.parse import quote
+
+import httpx
+
+from job_agent.models import NormalizedJob, SearchPage, SearchQuery
+from job_agent.utils import infer_remote, job_matches_query, parse_datetime, strip_html
+
+from .base import BaseConnector
+
+
+class GreenhouseConnector(BaseConnector):
+    def __init__(
+        self,
+        board_token: str,
+        company_name: str | None = None,
+        include_content: bool = True,
+        client: httpx.AsyncClient | None = None,
+    ) -> None:
+        if not board_token:
+            raise ValueError("Greenhouse board token is required")
+        super().__init__(client)
+        self.board_token = board_token
+        self.company_name = company_name or board_token.replace("-", " ").title()
+        self.include_content = include_content
+        self.source = f"greenhouse:{board_token}"
+
+    async def search(self, query: SearchQuery, cursor: str | None = None) -> SearchPage:
+        del cursor
+        token = quote(self.board_token, safe="")
+        payload = await self._json_request(
+            "GET",
+            f"https://boards-api.greenhouse.io/v1/boards/{token}/jobs",
+            params={"content": str(self.include_content).lower()},
+        )
+        jobs = [self._normalize(row) for row in payload.get("jobs", [])]
+        jobs = [job for job in jobs if job_matches_query(job, query)]
+        return SearchPage(jobs=jobs, total_available=int(payload.get("meta", {}).get("total", len(jobs))))
+
+    def _normalize(self, row: dict) -> NormalizedJob:
+        location = (row.get("location") or {}).get("name")
+        url = row.get("absolute_url")
+        return NormalizedJob(
+            source=self.source,
+            source_job_id=str(row.get("id")),
+            title=row.get("title") or "Untitled job",
+            company=self.company_name,
+            location=location,
+            description=strip_html(row.get("content")),
+            remote=infer_remote(location),
+            posted_at=parse_datetime(row.get("updated_at")),
+            job_url=url,
+            apply_url=url,
+            raw=row,
+        )
+
+
+
+--------------------------------------------------------------------------------
+FILE 14 of 39: src\job_agent\connectors\jooble.py
+Size: 2.46 KB
+--------------------------------------------------------------------------------
+from __future__ import annotations
+
+import httpx
+
+from job_agent.models import NormalizedJob, SearchPage, SearchQuery
+from job_agent.utils import fallback_job_id, infer_remote, parse_datetime, strip_html
+
+from .base import BaseConnector
+
+
+class JoobleConnector(BaseConnector):
+    source = "jooble"
+
+    def __init__(
+        self,
+        api_key: str,
+        base_url: str = "https://uk.jooble.org",
+        client: httpx.AsyncClient | None = None,
+    ) -> None:
+        if not api_key:
+            raise ValueError("Jooble API key is required")
+        super().__init__(client)
+        self.api_key = api_key
+        self.base_url = base_url.rstrip("/")
+
+    async def search(self, query: SearchQuery, cursor: str | None = None) -> SearchPage:
+        page = int(cursor or 1)
+        body: dict[str, object] = {
+            "keywords": query.keyword_text,
+            "location": query.location or "",
+            "page": page,
+            "ResultOnPage": query.page_size,
+        }
+        if query.minimum_salary is not None:
+            body["salary"] = int(query.minimum_salary)
+
+        payload = await self._json_request(
+            "POST",
+            f"{self.base_url}/api/{self.api_key}",
+            json=body,
+            headers={"Content-Type": "application/json"},
+        )
+        rows = payload.get("jobs", [])
+        total = int(payload.get("totalCount", len(rows)))
+        jobs = [self._normalize(row) for row in rows]
+        next_cursor = str(page + 1) if rows and page * query.page_size < total else None
+        return SearchPage(jobs=jobs, next_cursor=next_cursor, total_available=total)
+
+    def _normalize(self, row: dict) -> NormalizedJob:
+        job_url = row.get("link") or row.get("url")
+        job_id = str(row.get("id") or fallback_job_id(job_url, row.get("title"), row.get("company")))
+        location = row.get("location")
+        return NormalizedJob(
+            source=self.source,
+            source_job_id=job_id,
+            title=row.get("title") or "Untitled job",
+            company=row.get("company") or row.get("source") or "Unknown employer",
+            location=location,
+            description=strip_html(row.get("snippet") or row.get("description")),
+            salary_text=row.get("salary"),
+            employment_type=row.get("type"),
+            remote=infer_remote(location),
+            posted_at=parse_datetime(row.get("updated") or row.get("date")),
+            job_url=job_url,
+            apply_url=job_url,
+            raw=row,
+        )
+
+
+
+--------------------------------------------------------------------------------
+FILE 15 of 39: src\job_agent\connectors\lever.py
+Size: 2.64 KB
+--------------------------------------------------------------------------------
+from __future__ import annotations
+
+from urllib.parse import quote
+
+import httpx
+
+from job_agent.models import NormalizedJob, SearchPage, SearchQuery
+from job_agent.utils import as_float, infer_remote, job_matches_query, parse_datetime, strip_html
+
+from .base import BaseConnector
+
+
+class LeverConnector(BaseConnector):
+    def __init__(
+        self,
+        site: str,
+        company_name: str | None = None,
+        client: httpx.AsyncClient | None = None,
+    ) -> None:
+        if not site:
+            raise ValueError("Lever site name is required")
+        super().__init__(client)
+        self.site = site
+        self.company_name = company_name or site.replace("-", " ").title()
+        self.source = f"lever:{site}"
+
+    async def search(self, query: SearchQuery, cursor: str | None = None) -> SearchPage:
+        skip = int(cursor or 0)
+        site = quote(self.site, safe="")
+        payload = await self._json_request(
+            "GET",
+            f"https://api.lever.co/v0/postings/{site}",
+            params={"mode": "json", "skip": skip, "limit": query.page_size},
+        )
+        jobs = [self._normalize(row) for row in payload]
+        jobs = [job for job in jobs if job_matches_query(job, query)]
+        next_cursor = str(skip + len(payload)) if len(payload) == query.page_size else None
+        return SearchPage(jobs=jobs, next_cursor=next_cursor)
+
+    def _normalize(self, row: dict) -> NormalizedJob:
+        categories = row.get("categories") or {}
+        salary = row.get("salaryRange") or {}
+        location = categories.get("location")
+        description = row.get("descriptionPlain") or strip_html(row.get("description"))
+        if not description:
+            description = " ".join(
+                filter(None, [row.get("openingPlain"), row.get("additionalPlain")])
+            ) or None
+        return NormalizedJob(
+            source=self.source,
+            source_job_id=str(row.get("id")),
+            title=row.get("text") or "Untitled job",
+            company=self.company_name,
+            location=location,
+            description=description,
+            salary_min=as_float(salary.get("min")),
+            salary_max=as_float(salary.get("max")),
+            salary_currency=salary.get("currency"),
+            salary_interval=salary.get("interval"),
+            salary_text=row.get("salaryDescriptionPlain"),
+            employment_type=categories.get("commitment"),
+            remote=infer_remote(location, row.get("workplaceType") == "remote"),
+            posted_at=parse_datetime(row.get("createdAt")),
+            job_url=row.get("hostedUrl"),
+            apply_url=row.get("applyUrl") or row.get("hostedUrl"),
+            raw=row,
+        )
+
+
+
+--------------------------------------------------------------------------------
+FILE 16 of 39: src\job_agent\connectors\linkedin_public.py
+Size: 5.32 KB
+--------------------------------------------------------------------------------
+from __future__ import annotations
+
+import re
+from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
+
+import httpx
+from lxml import html
+
+from job_agent.errors import ConnectorError
+from job_agent.models import NormalizedJob, SearchPage, SearchQuery
+from job_agent.utils import fallback_job_id, infer_remote, parse_datetime
+
+from .base import BaseConnector
+
+
+class LinkedInPublicConnector(BaseConnector):
+    """Parse public HTML result batches from a configured LinkedIn search URL.
+
+    This connector intentionally does not use private pagination endpoints,
+    authenticated sessions, or challenge-bypass behavior.
+    """
+
+    source = "linkedin-public"
+
+    def __init__(
+        self,
+        search_url: str,
+        client: httpx.AsyncClient | None = None,
+    ) -> None:
+        valid_prefixes = (
+            "https://www.linkedin.com/jobs/search/",
+            "https://www.linkedin.com/jobs-guest/jobs/api/seeMoreJobPostings/search",
+        )
+        if not search_url.startswith(valid_prefixes):
+            raise ValueError("A supported public linkedin.com jobs search URL is required")
+        super().__init__(client)
+        self.search_url = search_url
+
+    async def search(self, query: SearchQuery, cursor: str | None = None) -> SearchPage:
+        is_fragment = "/jobs-guest/jobs/api/seeMoreJobPostings/search" in self.search_url
+        url = self._url_for_query(query, cursor)
+        try:
+            response = await self.client.get(url)
+            response.raise_for_status()
+        except httpx.HTTPStatusError as exc:
+            raise ConnectorError(
+                f"{self.source} returned HTTP {exc.response.status_code}; automated access stopped"
+            ) from exc
+        except httpx.HTTPError as exc:
+            raise ConnectorError(f"{self.source} request failed: {exc}") from exc
+
+        if not response.text.strip():
+            if is_fragment:
+                return SearchPage(jobs=[])
+            raise ConnectorError("LinkedIn returned an empty search page")
+
+        document = html.fromstring(response.text)
+        cards = document.xpath('//li[.//div[contains(@class, "base-card")]]')
+        if not cards:
+            page_text = " ".join(document.text_content().split()).casefold()
+            if "sign in" in page_text or "join now" in page_text:
+                raise ConnectorError(
+                    "LinkedIn returned a sign-in wall without public job cards"
+                )
+            if is_fragment and not page_text:
+                return SearchPage(jobs=[])
+            raise ConnectorError("LinkedIn returned no recognizable public job cards")
+
+        jobs = [self._normalize(card) for card in cards]
+        if is_fragment:
+            start = int(dict(parse_qsl(urlsplit(url).query)).get("start", "0"))
+            return SearchPage(jobs=jobs, next_cursor=str(start + len(cards)))
+        return SearchPage(jobs=jobs, total_available=len(jobs))
+
+    def _url_for_query(self, query: SearchQuery, cursor: str | None) -> str:
+        parts = urlsplit(self.search_url)
+        params = dict(parse_qsl(parts.query, keep_blank_values=True))
+        params.pop("currentJobId", None)
+        params["keywords"] = query.keyword_text
+        if "/jobs-guest/jobs/api/seeMoreJobPostings/search" in parts.path:
+            params["start"] = cursor or params.get("start", "0")
+        return urlunsplit((parts.scheme, parts.netloc, parts.path, urlencode(params), ""))
+
+    def _normalize(self, card) -> NormalizedJob:
+        title = self._text(card, './/h3[contains(@class, "base-search-card__title")]')
+        company = self._text(card, './/h4[contains(@class, "base-search-card__subtitle")]')
+        location = self._text(card, './/span[contains(@class, "job-search-card__location")]')
+        posted = self._attribute(card, ".//time", "datetime")
+        raw_url = self._attribute(
+            card,
+            './/a[contains(@class, "base-card__full-link")]',
+            "href",
+        )
+        entity = self._attribute(card, './/div[contains(@class, "base-card")]', "data-entity-urn")
+        match = re.search(r"jobPosting:(\d+)", entity or "")
+        job_id = match.group(1) if match else fallback_job_id(raw_url, title, company)
+        job_url = self._canonical_url(raw_url)
+        return NormalizedJob(
+            source=self.source,
+            source_job_id=job_id,
+            title=title or "Untitled job",
+            company=company or "Unknown employer",
+            location=location,
+            remote=infer_remote(location),
+            posted_at=parse_datetime(posted),
+            job_url=job_url,
+            apply_url=job_url,
+            raw={
+                "entity_urn": entity,
+                "search_result_url": raw_url,
+                "configured_search_url": self.search_url,
+            },
+        )
+
+    @staticmethod
+    def _text(card, xpath: str) -> str | None:
+        nodes = card.xpath(xpath)
+        return " ".join(nodes[0].text_content().split()) if nodes else None
+
+    @staticmethod
+    def _attribute(card, xpath: str, name: str) -> str | None:
+        nodes = card.xpath(xpath)
+        return nodes[0].get(name) if nodes else None
+
+    @staticmethod
+    def _canonical_url(value: str | None) -> str:
+        if not value:
+            raise ConnectorError("LinkedIn job card did not include a link")
+        parts = urlsplit(value)
+        return urlunsplit((parts.scheme, parts.netloc, parts.path, "", ""))
+
+
+--------------------------------------------------------------------------------
+FILE 17 of 39: src\job_agent\connectors\reed.py
+Size: 2.79 KB
+--------------------------------------------------------------------------------
+from __future__ import annotations
+
+import httpx
+
+from job_agent.models import NormalizedJob, SearchPage, SearchQuery
+from job_agent.utils import as_float, infer_remote, parse_datetime
+
+from .base import BaseConnector
+
+
+class ReedConnector(BaseConnector):
+    source = "reed"
+    search_url = "https://www.reed.co.uk/api/1.0/search"
+
+    def __init__(self, api_key: str, client: httpx.AsyncClient | None = None) -> None:
+        if not api_key:
+            raise ValueError("Reed API key is required")
+        super().__init__(client)
+        self.api_key = api_key
+
+    async def search(self, query: SearchQuery, cursor: str | None = None) -> SearchPage:
+        offset = int(cursor or 0)
+        page_size = min(query.page_size, 100)
+        params: dict[str, object] = {
+            "keywords": query.keyword_text,
+            "resultsToTake": page_size,
+            "resultsToSkip": offset,
+        }
+        if query.location:
+            params["locationName"] = query.location
+        if query.minimum_salary is not None:
+            params["minimumSalary"] = query.minimum_salary
+        if query.maximum_salary is not None:
+            params["maximumSalary"] = query.maximum_salary
+
+        payload = await self._json_request(
+            "GET",
+            self.search_url,
+            params=params,
+            auth=httpx.BasicAuth(self.api_key, ""),
+        )
+        rows = payload.get("results", [])
+        total = int(payload.get("totalResults", len(rows)))
+        jobs = [self._normalize(row) for row in rows]
+        next_offset = offset + len(rows)
+        next_cursor = str(next_offset) if rows and next_offset < total else None
+        return SearchPage(jobs=jobs, next_cursor=next_cursor, total_available=total)
+
+    def _normalize(self, row: dict) -> NormalizedJob:
+        job_id = str(row.get("jobId") or row.get("id"))
+        job_url = row.get("jobUrl") or f"https://www.reed.co.uk/jobs/{job_id}"
+        location = row.get("locationName")
+        return NormalizedJob(
+            source=self.source,
+            source_job_id=job_id,
+            title=row.get("jobTitle") or "Untitled job",
+            company=row.get("employerName") or "Unknown employer",
+            location=location,
+            description=row.get("jobDescription") or row.get("description"),
+            salary_min=as_float(row.get("minimumSalary")),
+            salary_max=as_float(row.get("maximumSalary")),
+            salary_currency=row.get("currency") or "GBP",
+            employment_type=row.get("contractType") or row.get("jobType"),
+            remote=infer_remote(location),
+            posted_at=parse_datetime(row.get("date") or row.get("postedDate")),
+            expires_at=parse_datetime(row.get("expirationDate")),
+            job_url=job_url,
+            apply_url=row.get("externalUrl") or job_url,
+            raw=row,
+        )
+
+
+
+--------------------------------------------------------------------------------
+FILE 18 of 39: src\job_agent\connectors\smartrecruiters.py
+Size: 3.99 KB
+--------------------------------------------------------------------------------
+from __future__ import annotations
+
+import asyncio
+from urllib.parse import quote
+
+import httpx
+
+from job_agent.models import NormalizedJob, SearchPage, SearchQuery
+from job_agent.utils import infer_remote, job_matches_query, parse_datetime, strip_html
+
+from .base import BaseConnector
+
+
+class SmartRecruitersConnector(BaseConnector):
+    def __init__(
+        self,
+        company_identifier: str,
+        company_name: str | None = None,
+        client: httpx.AsyncClient | None = None,
+    ) -> None:
+        if not company_identifier:
+            raise ValueError("SmartRecruiters company identifier is required")
+        super().__init__(client)
+        self.company_identifier = company_identifier
+        self.company_name = company_name
+        self.source = f"smartrecruiters:{company_identifier}"
+
+    async def search(self, query: SearchQuery, cursor: str | None = None) -> SearchPage:
+        offset = int(cursor or 0)
+        company = quote(self.company_identifier, safe="")
+        params: dict[str, object] = {"limit": query.page_size, "offset": offset}
+        if query.keyword_text:
+            params["q"] = query.keyword_text
+        if query.location:
+            params["city"] = query.location
+
+        payload = await self._json_request(
+            "GET",
+            f"https://api.smartrecruiters.com/v1/companies/{company}/postings",
+            params=params,
+        )
+        rows = payload.get("content", [])
+        detail_results = await asyncio.gather(
+            *(self._fetch_detail(company, row) for row in rows),
+            return_exceptions=True,
+        )
+        enriched_rows = [
+            detail if isinstance(detail, dict) else row
+            for row, detail in zip(rows, detail_results, strict=True)
+        ]
+        jobs = [self._normalize(row) for row in enriched_rows]
+        jobs = [job for job in jobs if job_matches_query(job, query)]
+        total = int(payload.get("totalFound", len(rows)))
+        next_offset = offset + len(rows)
+        next_cursor = str(next_offset) if rows and next_offset < total else None
+        return SearchPage(jobs=jobs, next_cursor=next_cursor, total_available=total)
+
+    async def _fetch_detail(self, company: str, row: dict) -> dict:
+        job_id = quote(str(row.get("id")), safe="")
+        return await self._json_request(
+            "GET",
+            f"https://api.smartrecruiters.com/v1/companies/{company}/postings/{job_id}",
+        )
+
+    def _normalize(self, row: dict) -> NormalizedJob:
+        company = row.get("company") or {}
+        location_data = row.get("location") or {}
+        employment = row.get("typeOfEmployment") or {}
+        sections = ((row.get("jobAd") or {}).get("sections") or {})
+        description_parts = [
+            strip_html(section.get("text"))
+            for section in sections.values()
+            if isinstance(section, dict) and section.get("text")
+        ]
+        location = location_data.get("fullLocation") or ", ".join(
+            filter(None, [location_data.get("city"), location_data.get("region"), location_data.get("country")])
+        )
+        job_id = str(row.get("id"))
+        url = row.get("postingUrl") or row.get("ref")
+        if url and url.startswith("https://api.smartrecruiters.com"):
+            url = f"https://jobs.smartrecruiters.com/{self.company_identifier}/{job_id}"
+        return NormalizedJob(
+            source=self.source,
+            source_job_id=job_id,
+            title=row.get("name") or "Untitled job",
+            company=self.company_name or company.get("name") or "Unknown employer",
+            location=location or None,
+            description=" ".join(filter(None, description_parts)) or None,
+            employment_type=employment.get("label") if isinstance(employment, dict) else str(employment),
+            remote=infer_remote(location, location_data.get("remote")),
+            posted_at=parse_datetime(row.get("releasedDate")),
+            job_url=row.get("postingUrl") or url,
+            apply_url=row.get("applyUrl") or row.get("postingUrl") or url,
+            raw=row,
+        )
+
+
+--------------------------------------------------------------------------------
+FILE 19 of 39: src\job_agent\errors.py
+Size: 0.12 KB
+--------------------------------------------------------------------------------
+class ConnectorError(RuntimeError):
+    """A source connector could not complete a request or parse its response."""
+
+
+
+--------------------------------------------------------------------------------
+FILE 20 of 39: src\job_agent\models.py
+Size: 2.51 KB
+--------------------------------------------------------------------------------
+from __future__ import annotations
+
+from datetime import datetime, timezone
+from typing import Any
+
+from pydantic import BaseModel, Field, computed_field, field_validator
+
+
+class SearchQuery(BaseModel):
+    keywords: list[str] = Field(default_factory=list)
+    location: str | None = None
+    remote: bool | None = None
+    minimum_salary: float | None = Field(default=None, ge=0)
+    maximum_salary: float | None = Field(default=None, ge=0)
+    posted_within_days: int | None = Field(default=None, ge=0, le=365)
+    country: str = Field(default="gb", min_length=2, max_length=2)
+    page_size: int = Field(default=50, ge=1, le=100)
+
+    @field_validator("keywords")
+    @classmethod
+    def clean_keywords(cls, value: list[str]) -> list[str]:
+        return [keyword.strip() for keyword in value if keyword.strip()]
+
+    @field_validator("country")
+    @classmethod
+    def normalize_country(cls, value: str) -> str:
+        return value.lower()
+
+    @computed_field
+    @property
+    def keyword_text(self) -> str:
+        return " ".join(self.keywords)
+
+
+class NormalizedJob(BaseModel):
+    source: str
+    source_job_id: str
+    title: str
+    company: str
+    location: str | None = None
+    description: str | None = None
+    salary_min: float | None = None
+    salary_max: float | None = None
+    salary_currency: str | None = None
+    salary_interval: str | None = None
+    salary_text: str | None = None
+    employment_type: str | None = None
+    remote: bool | None = None
+    posted_at: datetime | None = None
+    expires_at: datetime | None = None
+    job_url: str
+    apply_url: str | None = None
+    retrieved_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    raw: dict[str, Any] = Field(default_factory=dict, exclude=True)
+
+
+class SearchPage(BaseModel):
+    jobs: list[NormalizedJob]
+    next_cursor: str | None = None
+    total_available: int | None = None
+
+    @property
+    def has_more(self) -> bool:
+        return self.next_cursor is not None
+
+
+class SourceSearchResult(BaseModel):
+    source: str
+    jobs: list[NormalizedJob] = Field(default_factory=list)
+    pages_fetched: int = 0
+    total_reported: int | None = None
+    error: str | None = None
+
+
+class SearchRequest(SearchQuery):
+    sources: list[str] | None = None
+    max_pages_per_source: int | None = Field(default=20, ge=1, le=500)
+
+
+class SearchResponse(BaseModel):
+    query: SearchQuery
+    results: list[SourceSearchResult]
+
+    @computed_field
+    @property
+    def jobs_found(self) -> int:
+        return sum(len(result.jobs) for result in self.results)
+
+
+
+--------------------------------------------------------------------------------
+FILE 21 of 39: src\job_agent\registry.py
+Size: 2.08 KB
+--------------------------------------------------------------------------------
+from __future__ import annotations
+
+import os
+from collections.abc import Iterable
+
+from dotenv import load_dotenv
+
+from .connectors import (
+    AdzunaConnector,
+    AshbyConnector,
+    GreenhouseConnector,
+    JoobleConnector,
+    LeverConnector,
+    LinkedInPublicConnector,
+    ReedConnector,
+    SmartRecruitersConnector,
+)
+from .connectors.base import BaseConnector
+
+
+def _configured_boards(value: str | None) -> Iterable[tuple[str, str | None]]:
+    for item in (value or "").split(","):
+        item = item.strip()
+        if not item:
+            continue
+        identifier, separator, display_name = item.partition("|")
+        yield identifier.strip(), display_name.strip() if separator else None
+
+
+def build_connectors_from_env() -> dict[str, BaseConnector]:
+    load_dotenv()
+    connectors: list[BaseConnector] = []
+
+    if reed_key := os.getenv("REED_API_KEY"):
+        connectors.append(ReedConnector(reed_key))
+    if adzuna_id := os.getenv("ADZUNA_APP_ID"):
+        adzuna_key = os.getenv("ADZUNA_APP_KEY")
+        if adzuna_key:
+            connectors.append(
+                AdzunaConnector(adzuna_id, adzuna_key, os.getenv("ADZUNA_COUNTRY", "gb"))
+            )
+    if jooble_key := os.getenv("JOOBLE_API_KEY"):
+        connectors.append(
+            JoobleConnector(jooble_key, os.getenv("JOOBLE_BASE_URL", "https://uk.jooble.org"))
+        )
+
+    for board, company in _configured_boards(os.getenv("GREENHOUSE_BOARDS")):
+        connectors.append(GreenhouseConnector(board, company))
+    for site, company in _configured_boards(os.getenv("LEVER_SITES")):
+        connectors.append(LeverConnector(site, company))
+    for board, company in _configured_boards(os.getenv("ASHBY_BOARDS")):
+        connectors.append(AshbyConnector(board, company))
+    for identifier, company in _configured_boards(os.getenv("SMARTRECRUITERS_COMPANIES")):
+        connectors.append(SmartRecruitersConnector(identifier, company))
+    if linkedin_url := os.getenv("LINKEDIN_PUBLIC_SEARCH_URL"):
+        connectors.append(LinkedInPublicConnector(linkedin_url))
+
+    return {connector.source: connector for connector in connectors}
+
+
+--------------------------------------------------------------------------------
+FILE 22 of 39: src\job_agent\service.py
+Size: 2.11 KB
+--------------------------------------------------------------------------------
+from __future__ import annotations
+
+import asyncio
+
+from .connectors.base import BaseConnector
+from .models import SearchQuery, SourceSearchResult
+
+
+class SearchService:
+    def __init__(self, connectors: dict[str, BaseConnector]) -> None:
+        self.connectors = connectors
+
+    async def close(self) -> None:
+        await asyncio.gather(*(connector.close() for connector in self.connectors.values()))
+
+    async def search_all(
+        self,
+        query: SearchQuery,
+        sources: list[str] | None = None,
+        max_pages_per_source: int | None = 20,
+    ) -> list[SourceSearchResult]:
+        selected = sources or list(self.connectors)
+        return await asyncio.gather(
+            *(self._search_source(source, query, max_pages_per_source) for source in selected)
+        )
+
+    async def _search_source(
+        self,
+        source: str,
+        query: SearchQuery,
+        max_pages: int | None,
+    ) -> SourceSearchResult:
+        connector = self.connectors.get(source)
+        if connector is None:
+            return SourceSearchResult(source=source, error="Source is not configured")
+
+        cursor: str | None = None
+        jobs = []
+        pages = 0
+        total_reported: int | None = None
+        try:
+            while True:
+                page = await connector.search(query, cursor)
+                pages += 1
+                jobs.extend(page.jobs)
+                if page.total_available is not None:
+                    total_reported = page.total_available
+                cursor = page.next_cursor
+                if cursor is None or (max_pages is not None and pages >= max_pages):
+                    break
+            return SourceSearchResult(
+                source=source,
+                jobs=jobs,
+                pages_fetched=pages,
+                total_reported=total_reported,
+            )
+        except Exception as exc:  # Result must preserve failures from other sources.
+            return SourceSearchResult(
+                source=source,
+                jobs=jobs,
+                pages_fetched=pages,
+                total_reported=total_reported,
+                error=str(exc),
+            )
+
+
+
+--------------------------------------------------------------------------------
+FILE 23 of 39: src\job_agent\utils.py
+Size: 3.96 KB
+--------------------------------------------------------------------------------
+from __future__ import annotations
+
+import hashlib
+import re
+from datetime import datetime, timedelta, timezone
+from html.parser import HTMLParser
+from typing import Any, Iterable
+
+from .models import NormalizedJob, SearchQuery
+
+
+class _TextExtractor(HTMLParser):
+    def __init__(self) -> None:
+        super().__init__()
+        self.parts: list[str] = []
+
+    def handle_data(self, data: str) -> None:
+        if data.strip():
+            self.parts.append(data.strip())
+
+
+def strip_html(value: str | None) -> str | None:
+    if not value:
+        return None
+    parser = _TextExtractor()
+    parser.feed(value)
+    text = " ".join(parser.parts)
+    return re.sub(r"\s+", " ", text).strip() or None
+
+
+def parse_datetime(value: Any) -> datetime | None:
+    if value in (None, ""):
+        return None
+    if isinstance(value, datetime):
+        return value if value.tzinfo else value.replace(tzinfo=timezone.utc)
+    if isinstance(value, (int, float)):
+        timestamp = float(value)
+        if timestamp > 10_000_000_000:
+            timestamp /= 1000
+        return datetime.fromtimestamp(timestamp, tz=timezone.utc)
+    if isinstance(value, str):
+        candidate = value.strip().replace("Z", "+00:00")
+        try:
+            parsed = datetime.fromisoformat(candidate)
+        except ValueError:
+            for fmt in ("%Y-%m-%d", "%d/%m/%Y", "%Y-%m-%d %H:%M:%S"):
+                try:
+                    parsed = datetime.strptime(candidate, fmt)
+                    break
+                except ValueError:
+                    continue
+            else:
+                return None
+        return parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
+    return None
+
+
+def as_float(value: Any) -> float | None:
+    if value in (None, ""):
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def fallback_job_id(*values: str | None) -> str:
+    material = "|".join(value or "" for value in values)
+    return hashlib.sha256(material.encode("utf-8")).hexdigest()[:24]
+
+
+def join_nonempty(values: Iterable[str | None], separator: str = ", ") -> str | None:
+    cleaned = [str(value).strip() for value in values if value and str(value).strip()]
+    return separator.join(cleaned) or None
+
+
+def infer_remote(location: str | None, explicit: Any = None) -> bool | None:
+    if isinstance(explicit, bool):
+        return explicit
+    if location and "remote" in location.casefold():
+        return True
+    return None
+
+
+def contains_search_term(text: str, term: str) -> bool:
+    """Match a complete search term so `java` does not match `javascript`."""
+    normalized_term = term.strip().casefold()
+    if not normalized_term:
+        return True
+    pattern = rf"(?<!\w){re.escape(normalized_term)}(?!\w)"
+    return re.search(pattern, text.casefold()) is not None
+
+
+def job_matches_query(job: NormalizedJob, query: SearchQuery) -> bool:
+    haystack = " ".join(
+        part for part in (job.title, job.company, job.description or "") if part
+    ).casefold()
+    if query.keywords and not all(contains_search_term(haystack, keyword) for keyword in query.keywords):
+        return False
+
+    if query.remote is True and job.remote is not True:
+        return False
+    if query.remote is False and job.remote is True:
+        return False
+
+    if query.location and not query.remote:
+        location = (job.location or "").casefold()
+        if query.location.casefold() not in location:
+            return False
+
+    if query.minimum_salary is not None and job.salary_max is not None:
+        if job.salary_max < query.minimum_salary:
+            return False
+    if query.maximum_salary is not None and job.salary_min is not None:
+        if job.salary_min > query.maximum_salary:
+            return False
+
+    if query.posted_within_days is not None and job.posted_at is not None:
+        cutoff = datetime.now(timezone.utc) - timedelta(days=query.posted_within_days)
+        if job.posted_at.astimezone(timezone.utc) < cutoff:
+            return False
+    return True
+
+
+--------------------------------------------------------------------------------
+FILE 24 of 39: src\personal_job_agent.egg-info\dependency_links.txt
+Size: 0 KB
+--------------------------------------------------------------------------------
+
+
+
+--------------------------------------------------------------------------------
+FILE 25 of 39: src\personal_job_agent.egg-info\PKG-INFO
+Size: 0.41 KB
+--------------------------------------------------------------------------------
+Metadata-Version: 2.4
+Name: personal-job-agent
+Version: 0.1.0
+Summary: Local job search API with pluggable source connectors.
+Requires-Python: >=3.11
+Requires-Dist: fastapi<1,>=0.116
+Requires-Dist: httpx<1,>=0.28
+Requires-Dist: lxml<7,>=5
+Requires-Dist: pydantic<3,>=2.12
+Requires-Dist: python-dotenv<2,>=1.0
+Requires-Dist: uvicorn<1,>=0.35
+Provides-Extra: test
+Requires-Dist: pytest<9,>=8.4; extra == "test"
+
+
+--------------------------------------------------------------------------------
+FILE 26 of 39: src\personal_job_agent.egg-info\requires.txt
+Size: 0.12 KB
+--------------------------------------------------------------------------------
+fastapi<1,>=0.116
+httpx<1,>=0.28
+lxml<7,>=5
+pydantic<3,>=2.12
+python-dotenv<2,>=1.0
+uvicorn<1,>=0.35
+
+[test]
+pytest<9,>=8.4
+
+
+--------------------------------------------------------------------------------
+FILE 27 of 39: src\personal_job_agent.egg-info\SOURCES.txt
+Size: 0.99 KB
+--------------------------------------------------------------------------------
+README.md
+pyproject.toml
+src/job_agent/__init__.py
+src/job_agent/api.py
+src/job_agent/errors.py
+src/job_agent/models.py
+src/job_agent/registry.py
+src/job_agent/service.py
+src/job_agent/utils.py
+src/job_agent/connectors/__init__.py
+src/job_agent/connectors/adzuna.py
+src/job_agent/connectors/ashby.py
+src/job_agent/connectors/base.py
+src/job_agent/connectors/greenhouse.py
+src/job_agent/connectors/jooble.py
+src/job_agent/connectors/lever.py
+src/job_agent/connectors/linkedin_public.py
+src/job_agent/connectors/reed.py
+src/job_agent/connectors/smartrecruiters.py
+src/personal_job_agent.egg-info/PKG-INFO
+src/personal_job_agent.egg-info/SOURCES.txt
+src/personal_job_agent.egg-info/dependency_links.txt
+src/personal_job_agent.egg-info/requires.txt
+src/personal_job_agent.egg-info/top_level.txt
+tests/test_adzuna.py
+tests/test_ashby.py
+tests/test_greenhouse.py
+tests/test_jooble.py
+tests/test_lever.py
+tests/test_linkedin_public.py
+tests/test_reed.py
+tests/test_service.py
+tests/test_smartrecruiters.py
+tests/test_utils.py
+
+--------------------------------------------------------------------------------
+FILE 28 of 39: src\personal_job_agent.egg-info\top_level.txt
+Size: 0.01 KB
+--------------------------------------------------------------------------------
+job_agent
+
+
+--------------------------------------------------------------------------------
+FILE 29 of 39: test.ps1
+Size: 6.22 KB
+--------------------------------------------------------------------------------
+<#
+.SYNOPSIS
+    Recursively collects all files in a project folder into a single text file,
+    so the whole project can be pasted/imported into a chat (e.g. Claude).
+
+.DESCRIPTION
+    Walks the given project root, skips common noise folders (node_modules, .git,
+    build output, binaries, etc.), and writes each file's relative path plus its
+    content into one combined output .txt file with clear separators.
+
+.PARAMETER ProjectPath
+    Path to the root of the project. Defaults to the current directory.
+
+.PARAMETER OutputFile
+    Path to the output text file. Defaults to "ProjectExport.txt" in the current directory.
+
+.PARAMETER MaxFileSizeKB
+    Files larger than this (in KB) are skipped (noted in output). Default 500 KB.
+
+.PARAMETER ExcludeDirs
+    Extra directory names to exclude, added to the built-in default list.
+
+.PARAMETER ExcludeExtensions
+    Extra file extensions to exclude (binary/media/etc.), added to the default list.
+
+.EXAMPLE
+    .\Export-ProjectToText.ps1 -ProjectPath "C:\Code\MyApp" -OutputFile "C:\Code\MyApp_export.txt"
+
+.EXAMPLE
+    .\Export-ProjectToText.ps1
+    Runs against the current folder and writes ProjectExport.txt next to it.
+#>
+
+[CmdletBinding()]
+param(
+    [string]$ProjectPath = (Get-Location).Path,
+
+    [string]$OutputFile = (Join-Path (Get-Location).Path "ProjectExport.txt"),
+
+    [int]$MaxFileSizeKB = 500,
+
+    [string[]]$ExcludeDirs = @(),
+
+    [string[]]$ExcludeExtensions = @()
+)
+
+# ---- Default exclusions -----------------------------------------------------
+
+$defaultExcludeDirs = @(
+    ".git", ".svn", ".hg",
+    "node_modules", "bower_components",
+    "bin", "obj", "dist", "build", "out", ".next", ".nuxt",
+    ".vs", ".vscode", ".idea",
+    "venv", ".venv", "__pycache__", ".pytest_cache",
+    "target", "vendor",
+    ".cache", "coverage"
+)
+
+$defaultExcludeExtensions = @(
+    # binaries / archives
+    ".exe", ".dll", ".pdb", ".so", ".dylib", ".bin", ".obj", ".o",
+    ".zip", ".rar", ".7z", ".tar", ".gz",
+    # media
+    ".png", ".jpg", ".jpeg", ".gif", ".bmp", ".ico", ".svg",
+    ".mp3", ".mp4", ".mov", ".avi", ".wav",
+    # fonts / docs / misc binary formats
+    ".ttf", ".otf", ".woff", ".woff2",
+    ".pdf", ".doc", ".docx", ".xls", ".xlsx", ".ppt", ".pptx",
+    # lockfiles that add huge noise for little value (comment out to include)
+    ".lock"
+)
+
+$allExcludeDirs = ($defaultExcludeDirs + $ExcludeDirs) | Select-Object -Unique
+$allExcludeExtensions = ($defaultExcludeExtensions + $ExcludeExtensions) | Select-Object -Unique
+
+# ---- Validate ---------------------------------------------------------------
+
+if (-not (Test-Path -LiteralPath $ProjectPath)) {
+    Write-Error "ProjectPath '$ProjectPath' does not exist."
+    exit 1
+}
+
+$ProjectPath = (Resolve-Path -LiteralPath $ProjectPath).Path
+$maxBytes = $MaxFileSizeKB * 1KB
+
+Write-Host "Scanning project: $ProjectPath"
+Write-Host "Output file:      $OutputFile"
+Write-Host "Excluding dirs:   $($allExcludeDirs -join ', ')"
+Write-Host ""
+
+# ---- Gather files -------------------------------------------------------------
+
+# Build a regex-safe pattern to test whether any path segment matches an excluded dir name
+function Test-ExcludedPath {
+    param([string]$FullPath)
+
+    $relative = $FullPath.Substring($ProjectPath.Length).TrimStart('\', '/')
+    $segments = $relative -split '[\\/]'
+
+    foreach ($seg in $segments) {
+        if ($allExcludeDirs -contains $seg) {
+            return $true
+        }
+    }
+    return $false
+}
+
+$allFiles = Get-ChildItem -LiteralPath $ProjectPath -Recurse -File -Force -ErrorAction SilentlyContinue |
+    Where-Object {
+        -not (Test-ExcludedPath -FullPath $_.FullName) -and
+        ($allExcludeExtensions -notcontains $_.Extension.ToLower())
+    } |
+    Sort-Object FullName
+
+if ($allFiles.Count -eq 0) {
+    Write-Warning "No files found after applying exclusions. Nothing to export."
+    exit 0
+}
+
+Write-Host "Found $($allFiles.Count) file(s) to export..."
+Write-Host ""
+
+# ---- Write combined output ---------------------------------------------------
+
+# Reset/create output file
+$sw = New-Object System.IO.StreamWriter($OutputFile, $false, [System.Text.Encoding]::UTF8)
+
+try {
+    $sw.WriteLine("PROJECT EXPORT")
+    $sw.WriteLine("Source: $ProjectPath")
+    $sw.WriteLine("Generated: $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')")
+    $sw.WriteLine("Total files: $($allFiles.Count)")
+    $sw.WriteLine(("=" * 80))
+    $sw.WriteLine()
+
+    $counter = 0
+    foreach ($file in $allFiles) {
+        $counter++
+        $relativePath = $file.FullName.Substring($ProjectPath.Length).TrimStart('\', '/')
+
+        $sw.WriteLine(("-" * 80))
+        $sw.WriteLine("FILE $counter of $($allFiles.Count): $relativePath")
+        $sw.WriteLine("Size: $([math]::Round($file.Length / 1KB, 2)) KB")
+        $sw.WriteLine(("-" * 80))
+
+        if ($file.Length -gt $maxBytes) {
+            $sw.WriteLine("[SKIPPED - file exceeds $MaxFileSizeKB KB limit]")
+        }
+        else {
+            try {
+                # Try reading as text; if it looks binary, note that and skip content
+                $bytes = [System.IO.File]::ReadAllBytes($file.FullName)
+                $isBinary = $false
+
+                # crude binary check: look for null bytes in first 8000 bytes
+                $sampleLen = [Math]::Min(8000, $bytes.Length)
+                for ($i = 0; $i -lt $sampleLen; $i++) {
+                    if ($bytes[$i] -eq 0) { $isBinary = $true; break }
+                }
+
+                if ($isBinary) {
+                    $sw.WriteLine("[SKIPPED - binary file detected]")
+                }
+                else {
+                    $content = [System.Text.Encoding]::UTF8.GetString($bytes)
+                    $sw.WriteLine($content)
+                }
+            }
+            catch {
+                $sw.WriteLine("[ERROR READING FILE: $($_.Exception.Message)]")
+            }
+        }
+
+        $sw.WriteLine()
+        Write-Host "  [$counter/$($allFiles.Count)] $relativePath"
+    }
+
+    $sw.WriteLine(("=" * 80))
+    $sw.WriteLine("END OF EXPORT")
+}
+finally {
+    $sw.Close()
+}
+
+Write-Host ""
+Write-Host "Done. Combined project written to:" -ForegroundColor Green
+Write-Host "  $OutputFile" -ForegroundColor Green
+
+--------------------------------------------------------------------------------
+FILE 30 of 39: tests\test_adzuna.py
+Size: 2 KB
+--------------------------------------------------------------------------------
+import asyncio
+
+import httpx
+
+from job_agent.connectors import AdzunaConnector
+from job_agent.models import SearchQuery
+
+
+def test_adzuna_normalizes_results_and_paginates() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path.endswith("/jobs/gb/search/1")
+        assert request.url.params["what"] == "python developer"
+        assert request.url.params["app_id"] == "app-id"
+        return httpx.Response(
+            200,
+            json={
+                "count": 3,
+                "results": [
+                    {
+                        "id": "adz-1",
+                        "title": "Python Developer",
+                        "company": {"display_name": "Example Plc"},
+                        "location": {"display_name": "Manchester"},
+                        "description": "<p>Build useful services.</p>",
+                        "salary_min": 50000,
+                        "salary_max": 65000,
+                        "created": "2026-09-05T09:00:00Z",
+                        "redirect_url": "https://example.test/jobs/adz-1",
+                    },
+                    {
+                        "id": "adz-2",
+                        "title": "Senior Python Developer",
+                        "company": {"display_name": "Example Two"},
+                        "location": {"display_name": "Manchester"},
+                        "redirect_url": "https://example.test/jobs/adz-2",
+                    },
+                ],
+            },
+        )
+
+    async def scenario():
+        async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+            connector = AdzunaConnector("app-id", "app-key", client=client)
+            return await connector.search(
+                SearchQuery(keywords=["python", "developer"], location="Manchester", page_size=2)
+            )
+
+    page = asyncio.run(scenario())
+    assert page.next_cursor == "2"
+    assert page.jobs[0].description == "Build useful services."
+    assert page.jobs[0].company == "Example Plc"
+
+
+
+--------------------------------------------------------------------------------
+FILE 31 of 39: tests\test_ashby.py
+Size: 2.07 KB
+--------------------------------------------------------------------------------
+import asyncio
+
+import httpx
+
+from job_agent.connectors import AshbyConnector
+from job_agent.models import SearchQuery
+
+
+def test_ashby_normalizes_and_filters_company_board() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path == "/posting-api/job-board/example"
+        return httpx.Response(
+            200,
+            json={
+                "jobs": [
+                    {
+                        "id": "ash-1",
+                        "title": "Machine Learning Engineer",
+                        "location": "Remote - Europe",
+                        "descriptionPlain": "Build Python ML systems.",
+                        "employmentType": "FullTime",
+                        "isRemote": True,
+                        "isListed": True,
+                        "publishedAt": "2026-09-05T09:30:00Z",
+                        "jobUrl": "https://jobs.ashbyhq.com/example/ash-1",
+                        "applyUrl": "https://jobs.ashbyhq.com/example/ash-1/application",
+                        "compensation": {
+                            "minValue": 60000,
+                            "maxValue": 80000,
+                            "currencyCode": "GBP",
+                            "interval": "YEAR",
+                        },
+                    },
+                    {
+                        "id": "ash-2",
+                        "title": "Sales Executive",
+                        "location": "London",
+                        "isListed": True,
+                        "jobUrl": "https://jobs.ashbyhq.com/example/ash-2",
+                    },
+                ]
+            },
+        )
+
+    async def scenario():
+        async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+            connector = AshbyConnector("example", "Example Co", client)
+            return await connector.search(SearchQuery(keywords=["python"]))
+
+    page = asyncio.run(scenario())
+    assert page.total_available == 2
+    assert len(page.jobs) == 1
+    assert page.jobs[0].salary_min == 60000
+    assert page.jobs[0].employment_type == "FullTime"
+
+
+
+--------------------------------------------------------------------------------
+FILE 32 of 39: tests\test_greenhouse.py
+Size: 1.65 KB
+--------------------------------------------------------------------------------
+import asyncio
+
+import httpx
+
+from job_agent.connectors import GreenhouseConnector
+from job_agent.models import SearchQuery
+
+
+def test_greenhouse_normalizes_and_filters_company_board() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path == "/v1/boards/example/jobs"
+        assert request.url.params["content"] == "true"
+        return httpx.Response(
+            200,
+            json={
+                "jobs": [
+                    {
+                        "id": 1,
+                        "title": "Platform Engineer",
+                        "location": {"name": "Remote, UK"},
+                        "content": "<p>Work with Python services.</p>",
+                        "updated_at": "2026-09-05T11:00:00Z",
+                        "absolute_url": "https://boards.greenhouse.io/example/jobs/1",
+                    },
+                    {
+                        "id": 2,
+                        "title": "Accountant",
+                        "location": {"name": "London"},
+                        "absolute_url": "https://boards.greenhouse.io/example/jobs/2",
+                    },
+                ],
+                "meta": {"total": 2},
+            },
+        )
+
+    async def scenario():
+        async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+            connector = GreenhouseConnector("example", "Example Co", client=client)
+            return await connector.search(SearchQuery(keywords=["python"]))
+
+    page = asyncio.run(scenario())
+    assert page.total_available == 2
+    assert len(page.jobs) == 1
+    assert page.jobs[0].company == "Example Co"
+    assert page.jobs[0].remote is True
+
+
+
+--------------------------------------------------------------------------------
+FILE 33 of 39: tests\test_jooble.py
+Size: 1.63 KB
+--------------------------------------------------------------------------------
+import asyncio
+import json
+
+import httpx
+
+from job_agent.connectors import JoobleConnector
+from job_agent.models import SearchQuery
+
+
+def test_jooble_normalizes_results_and_paginates() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        body = json.loads(request.content)
+        assert request.url.path == "/api/key-123"
+        assert body["keywords"] == "data engineer"
+        assert body["location"] == "Birmingham"
+        return httpx.Response(
+            200,
+            json={
+                "totalCount": 2,
+                "jobs": [
+                    {
+                        "id": 800,
+                        "title": "Data Engineer",
+                        "company": "Example Data",
+                        "location": "Birmingham",
+                        "snippet": "<b>SQL</b> and Python",
+                        "salary": "£50,000–£60,000",
+                        "type": "Full-time",
+                        "updated": "2026-09-05T12:00:00Z",
+                        "link": "https://example.test/jobs/800",
+                    }
+                ],
+            },
+        )
+
+    async def scenario():
+        async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+            connector = JoobleConnector("key-123", "https://uk.jooble.org", client)
+            return await connector.search(
+                SearchQuery(keywords=["data", "engineer"], location="Birmingham", page_size=1)
+            )
+
+    page = asyncio.run(scenario())
+    assert page.next_cursor == "2"
+    assert page.jobs[0].description == "SQL and Python"
+    assert page.jobs[0].salary_text == "£50,000–£60,000"
+
+
+
+--------------------------------------------------------------------------------
+FILE 34 of 39: tests\test_lever.py
+Size: 1.62 KB
+--------------------------------------------------------------------------------
+import asyncio
+
+import httpx
+
+from job_agent.connectors import LeverConnector
+from job_agent.models import SearchQuery
+
+
+def test_lever_normalizes_results_and_paginates() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path == "/v0/postings/example"
+        assert request.url.params["skip"] == "0"
+        assert request.url.params["limit"] == "1"
+        return httpx.Response(
+            200,
+            json=[
+                {
+                    "id": "lev-1",
+                    "text": "Backend Engineer",
+                    "categories": {"location": "Remote - UK", "commitment": "Full-time"},
+                    "descriptionPlain": "Develop Java APIs.",
+                    "workplaceType": "remote",
+                    "salaryRange": {
+                        "min": 55000,
+                        "max": 70000,
+                        "currency": "GBP",
+                        "interval": "year",
+                    },
+                    "hostedUrl": "https://jobs.lever.co/example/lev-1",
+                    "applyUrl": "https://jobs.lever.co/example/lev-1/apply",
+                }
+            ],
+        )
+
+    async def scenario():
+        async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+            connector = LeverConnector("example", "Example Co", client)
+            return await connector.search(SearchQuery(keywords=["java"], page_size=1))
+
+    page = asyncio.run(scenario())
+    assert page.next_cursor == "1"
+    assert page.jobs[0].salary_max == 70000
+    assert page.jobs[0].remote is True
+    assert page.jobs[0].apply_url.endswith("/apply")
+
+
+
+--------------------------------------------------------------------------------
+FILE 35 of 39: tests\test_linkedin_public.py
+Size: 3.3 KB
+--------------------------------------------------------------------------------
+import asyncio
+
+import httpx
+
+from job_agent.connectors import LinkedInPublicConnector
+from job_agent.models import SearchQuery
+
+
+HTML = """
+<html><body>
+  <ul class="jobs-search__results-list">
+    <li>
+      <div class="base-card job-search-card" data-entity-urn="urn:li:jobPosting:4444978733">
+        <a class="base-card__full-link" href="https://uk.linkedin.com/jobs/view/java-engineer-4444978733?trackingId=test"></a>
+        <h3 class="base-search-card__title"> Java Engineer </h3>
+        <h4 class="base-search-card__subtitle"> Example Bank </h4>
+        <span class="job-search-card__location"> London, United Kingdom </span>
+        <time datetime="2026-09-06">1 hour ago</time>
+      </div>
+    </li>
+  </ul>
+</body></html>
+"""
+
+
+def test_linkedin_public_html_is_normalized_without_tracking_parameters() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.params["keywords"] == "python"
+        assert "currentJobId" not in request.url.params
+        assert request.url.params["f_TPR"] == "r86400"
+        return httpx.Response(200, text=HTML)
+
+    async def scenario():
+        async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+            connector = LinkedInPublicConnector(
+                "https://www.linkedin.com/jobs/search/?currentJobId=1&f_TPR=r86400&keywords=java",
+                client,
+            )
+            return await connector.search(SearchQuery(keywords=["python"]))
+
+    page = asyncio.run(scenario())
+    assert page.total_available == 1
+    assert page.next_cursor is None
+    assert page.jobs[0].source_job_id == "4444978733"
+    assert page.jobs[0].title == "Java Engineer"
+    assert page.jobs[0].company == "Example Bank"
+    assert page.jobs[0].job_url == "https://uk.linkedin.com/jobs/view/java-engineer-4444978733"
+
+
+def test_linkedin_guest_fragment_advances_by_returned_card_count() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.params["start"] == "100"
+        return httpx.Response(200, text=HTML)
+
+    async def scenario():
+        async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+            connector = LinkedInPublicConnector(
+                "https://www.linkedin.com/jobs-guest/jobs/api/seeMoreJobPostings/search?keywords=java&start=0",
+                client,
+            )
+            return await connector.search(SearchQuery(keywords=["java"]), cursor="100")
+
+    page = asyncio.run(scenario())
+    assert len(page.jobs) == 1
+    assert page.next_cursor == "101"
+    assert page.total_available is None
+
+
+def test_linkedin_public_stops_on_sign_in_wall_without_cards() -> None:
+    async def scenario():
+        transport = httpx.MockTransport(
+            lambda request: httpx.Response(200, text="<html><body>Sign in to continue</body></html>")
+        )
+        async with httpx.AsyncClient(transport=transport) as client:
+            connector = LinkedInPublicConnector(
+                "https://www.linkedin.com/jobs/search/?keywords=java",
+                client,
+            )
+            return await connector.search(SearchQuery(keywords=["java"]))
+
+    try:
+        asyncio.run(scenario())
+    except RuntimeError as exc:
+        assert "sign-in wall" in str(exc)
+    else:
+        raise AssertionError("Expected the connector to reject a sign-in wall")
+
+
+--------------------------------------------------------------------------------
+FILE 36 of 39: tests\test_reed.py
+Size: 1.85 KB
+--------------------------------------------------------------------------------
+import asyncio
+
+import httpx
+
+from job_agent.connectors import ReedConnector
+from job_agent.models import SearchQuery
+
+
+def test_reed_normalizes_results_and_paginates() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.params["keywords"] == "java"
+        assert request.url.params["locationName"] == "London"
+        assert request.headers["authorization"].startswith("Basic ")
+        return httpx.Response(
+            200,
+            json={
+                "totalResults": 3,
+                "results": [
+                    {
+                        "jobId": 101,
+                        "jobTitle": "Java Developer",
+                        "employerName": "Example Ltd",
+                        "locationName": "London",
+                        "minimumSalary": 45000,
+                        "maximumSalary": 60000,
+                        "date": "2026-09-05T10:00:00Z",
+                        "jobUrl": "https://www.reed.co.uk/jobs/101",
+                    },
+                    {
+                        "jobId": 102,
+                        "jobTitle": "Backend Java Engineer",
+                        "employerName": "Second Ltd",
+                        "locationName": "London",
+                        "jobUrl": "https://www.reed.co.uk/jobs/102",
+                    },
+                ],
+            },
+        )
+
+    async def scenario():
+        async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+            return await ReedConnector("secret", client).search(
+                SearchQuery(keywords=["java"], location="London", page_size=2)
+            )
+
+    page = asyncio.run(scenario())
+    assert page.next_cursor == "2"
+    assert page.total_available == 3
+    assert page.jobs[0].source == "reed"
+    assert page.jobs[0].salary_min == 45000
+    assert page.jobs[0].salary_currency == "GBP"
+
+
+
+--------------------------------------------------------------------------------
+FILE 37 of 39: tests\test_service.py
+Size: 1.35 KB
+--------------------------------------------------------------------------------
+import asyncio
+
+import httpx
+
+from job_agent.connectors import LeverConnector
+from job_agent.models import SearchQuery
+from job_agent.service import SearchService
+
+
+def test_service_follows_connectors_until_last_page() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        skip = int(request.url.params["skip"])
+        if skip == 0:
+            rows = [
+                {
+                    "id": "one",
+                    "text": "Engineer One",
+                    "categories": {},
+                    "hostedUrl": "https://jobs.test/one",
+                }
+            ]
+        else:
+            rows = []
+        return httpx.Response(200, json=rows)
+
+    async def scenario():
+        async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+            connector = LeverConnector("example", client=client)
+            service = SearchService({connector.source: connector})
+            return await service.search_all(SearchQuery(page_size=1), max_pages_per_source=None)
+
+    results = asyncio.run(scenario())
+    assert results[0].error is None
+    assert results[0].pages_fetched == 2
+    assert len(results[0].jobs) == 1
+
+
+def test_service_preserves_unknown_source_as_error() -> None:
+    results = asyncio.run(SearchService({}).search_all(SearchQuery(), ["missing"]))
+    assert results[0].error == "Source is not configured"
+
+
+
+--------------------------------------------------------------------------------
+FILE 38 of 39: tests\test_smartrecruiters.py
+Size: 2.42 KB
+--------------------------------------------------------------------------------
+import asyncio
+
+import httpx
+
+from job_agent.connectors import SmartRecruitersConnector
+from job_agent.models import SearchQuery
+
+
+def test_smartrecruiters_normalizes_results_and_paginates() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/v1/companies/example/postings":
+            assert request.url.params["q"] == "data"
+            return httpx.Response(200, json={
+                "offset": 0,
+                "limit": 1,
+                "totalFound": 2,
+                "content": [
+                    {
+                        "id": "sr-1",
+                        "name": "Data Engineer",
+                        "company": {"name": "Example Co"},
+                        "releasedDate": "2026-09-05T10:00:00Z",
+                        "location": {
+                            "fullLocation": "London, UK",
+                            "remote": False,
+                        },
+                        "typeOfEmployment": {"label": "Full-time"},
+                        "ref": "https://api.smartrecruiters.com/v1/companies/example/postings/sr-1",
+                    }
+                ],
+            })
+        assert request.url.path == "/v1/companies/example/postings/sr-1"
+        return httpx.Response(200, json={
+            "id": "sr-1",
+            "name": "Data Engineer",
+            "company": {"name": "Example Co"},
+            "releasedDate": "2026-09-05T10:00:00Z",
+            "location": {"fullLocation": "London, UK", "remote": False},
+            "typeOfEmployment": {"label": "Full-time"},
+            "postingUrl": "https://jobs.smartrecruiters.com/example/sr-1-data-engineer",
+            "applyUrl": "https://jobs.smartrecruiters.com/example/sr-1-data-engineer?apply=true",
+            "jobAd": {"sections": {"jobDescription": {"text": "<p>Build data systems.</p>"}}},
+        })
+
+    async def scenario():
+        async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+            connector = SmartRecruitersConnector("example", client=client)
+            return await connector.search(SearchQuery(keywords=["data"], page_size=1))
+
+    page = asyncio.run(scenario())
+    assert page.next_cursor == "1"
+    assert page.jobs[0].company == "Example Co"
+    assert page.jobs[0].job_url == "https://jobs.smartrecruiters.com/example/sr-1-data-engineer"
+    assert "Build data systems" in page.jobs[0].description
+    assert page.jobs[0].employment_type == "Full-time"
+
+
+--------------------------------------------------------------------------------
+FILE 39 of 39: tests\test_utils.py
+Size: 0.5 KB
+--------------------------------------------------------------------------------
+from job_agent.utils import contains_search_term
+
+
+def test_search_term_does_not_match_longer_programming_language() -> None:
+    assert contains_search_term("Backend development with Java and Go", "java")
+    assert not contains_search_term("Frontend development with JavaScript", "java")
+
+
+def test_search_term_supports_phrases_and_punctuation() -> None:
+    assert contains_search_term("We use Spring Boot-based services", "spring boot")
+    assert contains_search_term("Experience with C++ is useful", "c++")
+
+
+================================================================================
+END OF EXPORT

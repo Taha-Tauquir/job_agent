@@ -1,0 +1,128 @@
+from __future__ import annotations
+
+from contextlib import asynccontextmanager
+
+from fastapi import FastAPI, HTTPException, Response
+
+from .linkedin_job_details import LinkedInJobFetcher
+from .logging_utils import ApiRequestLoggingMiddleware
+from .models import (
+    LinkedInJobDescriptionRequest,
+    LinkedInJobDescriptionResult,
+    LinkedInJobDescriptionsResponse,
+    Schedule,
+    ScheduleCreateRequest,
+    ScheduleUpdateRequest,
+    SearchQuery,
+    SearchRequest,
+    SearchResponse,
+)
+from .registry import build_connectors_from_env
+from .provider_routes import router as provider_search_router
+from .scheduler import JobScheduler, ScheduleNotFoundError
+from .service import SearchService
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    connectors = build_connectors_from_env()
+    app.state.search_service = SearchService(connectors)
+    app.state.scheduler = JobScheduler(app.state.search_service)
+    yield
+    await app.state.scheduler.close()
+    await app.state.search_service.close()
+
+
+# Environment-backed source configuration is loaded by the application lifespan.
+app = FastAPI(title="Personal Job Agent API", version="0.2.0", lifespan=lifespan)
+app.add_middleware(ApiRequestLoggingMiddleware)
+app.include_router(provider_search_router)
+
+
+@app.get("/api/health")
+async def health() -> dict[str, object]:
+    return {"status": "ok", "configured_sources": list(app.state.search_service.connectors)}
+
+
+@app.get("/api/sources")
+async def sources() -> dict[str, list[str]]:
+    return {"sources": list(app.state.search_service.connectors)}
+
+
+@app.post("/api/search", response_model=SearchResponse)
+async def search(request: SearchRequest) -> SearchResponse:
+    query = SearchQuery(**request.model_dump(exclude={"sources", "max_pages_per_source"}))
+    results = await app.state.search_service.search_all(
+        query,
+        request.sources,
+        request.max_pages_per_source,
+    )
+    return SearchResponse(query=query, results=results)
+
+
+@app.post("/api/schedules", response_model=Schedule, status_code=201)
+async def create_schedule(request: ScheduleCreateRequest) -> Schedule:
+    try:
+        return app.state.scheduler.create(request)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@app.get("/api/schedules", response_model=list[Schedule])
+async def list_schedules() -> list[Schedule]:
+    return app.state.scheduler.list_schedules()
+
+
+@app.get("/api/schedules/{schedule_id}", response_model=Schedule)
+async def get_schedule(schedule_id: str) -> Schedule:
+    try:
+        return app.state.scheduler.get(schedule_id)
+    except ScheduleNotFoundError as exc:
+        raise HTTPException(status_code=404, detail="Schedule not found") from exc
+
+
+@app.patch("/api/schedules/{schedule_id}", response_model=Schedule)
+async def update_schedule(schedule_id: str, request: ScheduleUpdateRequest) -> Schedule:
+    try:
+        return app.state.scheduler.update(schedule_id, request)
+    except ScheduleNotFoundError as exc:
+        raise HTTPException(status_code=404, detail="Schedule not found") from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@app.delete("/api/schedules/{schedule_id}", status_code=204, response_class=Response)
+async def delete_schedule(schedule_id: str) -> Response:
+    try:
+        app.state.scheduler.delete(schedule_id)
+    except ScheduleNotFoundError as exc:
+        raise HTTPException(status_code=404, detail="Schedule not found") from exc
+    return Response(status_code=204)
+
+
+@app.post("/api/schedules/{schedule_id}/run-now", response_model=Schedule)
+async def run_schedule_now(schedule_id: str) -> Schedule:
+    try:
+        return await app.state.scheduler.run_now(schedule_id)
+    except ScheduleNotFoundError as exc:
+        raise HTTPException(status_code=404, detail="Schedule not found") from exc
+
+
+@app.post("/api/linkedin/job-descriptions", response_model=LinkedInJobDescriptionsResponse)
+async def fetch_linkedin_job_descriptions(
+    request: LinkedInJobDescriptionRequest,
+) -> LinkedInJobDescriptionsResponse:
+    fetcher = LinkedInJobFetcher()
+    results: list[LinkedInJobDescriptionResult] = []
+    try:
+        # Sequential on purpose: this shares one fetcher's self-throttle so
+        # a batch of URLs doesn't hit LinkedIn back-to-back.
+        for url in request.urls:
+            try:
+                job = await fetcher.fetch(url)
+                results.append(LinkedInJobDescriptionResult(url=url, job=job))
+            except Exception as exc:
+                results.append(LinkedInJobDescriptionResult(url=url, error=str(exc)))
+    finally:
+        await fetcher.close()
+    return LinkedInJobDescriptionsResponse(results=results)

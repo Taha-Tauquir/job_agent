@@ -1,0 +1,264 @@
+{
+  "info": {
+    "_postman_id": "88d8a9d2-fbd4-4d92-8ca9-63f724541a93",
+    "name": "Personal Job Agent API",
+    "description": "Canonical collection for every Personal Job Agent endpoint. Start the API locally, import this file into Postman, and run Health before using provider searches. Provider credentials and board configuration come from the server's .env file.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    {
+      "key": "baseUrl",
+      "value": "http://127.0.0.1:8000",
+      "type": "string"
+    },
+    {
+      "key": "scheduleId",
+      "value": "",
+      "type": "string"
+    }
+  ],
+  "event": [
+    {
+      "listen": "test",
+      "script": {
+        "type": "text/javascript",
+        "exec": [
+          "pm.test('Response status is successful', function () {",
+          "  pm.expect(pm.response.code).to.be.within(200, 299);",
+          "});"
+        ]
+      }
+    }
+  ],
+  "item": [
+    {
+      "name": "System",
+      "item": [
+        {
+          "name": "Health",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": { "raw": "{{baseUrl}}/api/health", "host": ["{{baseUrl}}"], "path": ["api", "health"] },
+            "description": "Checks service health and lists configured connector source IDs."
+          }
+        },
+        {
+          "name": "Configured Sources",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": { "raw": "{{baseUrl}}/api/sources", "host": ["{{baseUrl}}"], "path": ["api", "sources"] },
+            "description": "Lists the source IDs currently enabled by the server environment."
+          }
+        }
+      ]
+    },
+    {
+      "name": "Search",
+      "item": [
+        {
+          "name": "Combined Search",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"keywords\": [\"java\"],\n  \"location\": \"United Kingdom\",\n  \"remote\": null,\n  \"posted_within_days\": 30,\n  \"country\": \"gb\",\n  \"page_size\": 20,\n  \"sources\": [\"linkedin-public\", \"sponsoredjobs\"],\n  \"max_pages_per_source\": 2\n}"
+            },
+            "url": { "raw": "{{baseUrl}}/api/search", "host": ["{{baseUrl}}"], "path": ["api", "search"] },
+            "description": "Searches selected source IDs together. Remove sources to search every configured connector."
+          }
+        }
+      ]
+    },
+    {
+      "name": "Provider Searches",
+      "description": "Each request searches only the provider named in its URL. Remove optional filters or use an empty keywords array to return every matching listing exposed by that board.",
+      "item": [
+        {
+          "name": "LinkedIn Search",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"keywords\": [\"java\"],\n  \"location\": \"United Kingdom\",\n  \"posted_within_days\": 30,\n  \"page_size\": 20,\n  \"max_pages_per_source\": 2\n}" },
+            "url": { "raw": "{{baseUrl}}/api/linkedin/search", "host": ["{{baseUrl}}"], "path": ["api", "linkedin", "search"] },
+            "description": "Searches LinkedIn and automatically enriches every result from its public detail page, including the complete description, employment type, location, posted date, and expiry."
+          }
+        },
+        {
+          "name": "Sponsored Jobs Search",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"keywords\": [\"java\"],\n  \"remote\": null,\n  \"posted_within_days\": null,\n  \"page_size\": 100,\n  \"max_pages_per_source\": 2\n}" },
+            "url": { "raw": "{{baseUrl}}/api/sponsoredjobs/search", "host": ["{{baseUrl}}"], "path": ["api", "sponsoredjobs", "search"] },
+            "description": "Fetches Sponsored Jobs cards and enriches matches with complete detail-page data, including sponsorship, salary, SOC code, dates, descriptions, and apply links."
+          }
+        },
+        {
+          "name": "Reed Search",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"keywords\": [\"java\"],\n  \"location\": null,\n  \"minimum_salary\": null,\n  \"maximum_salary\": null,\n  \"posted_within_hours\": null,\n  \"posted_within_days\": null,\n  \"country\": \"gb\",\n  \"page_size\": 100,\n  \"max_pages_per_source\": null\n}" },
+            "url": { "raw": "{{baseUrl}}/api/reed/search", "host": ["{{baseUrl}}"], "path": ["api", "reed", "search"] },
+            "description": "Searches Reed using the API key configured securely in the server's .env file. Use posted_within_hours or posted_within_days; hours takes precedence when both are supplied. Reed has no upstream date filter, so the connector filters returned pages locally. Use a sufficient max_pages_per_source to scan beyond Reed's relevance-sorted first page. No Reed credential is required or stored in Postman."
+          }
+        },
+        {
+          "name": "Adzuna Search",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"keywords\": [\"java\"],\n  \"location\": \"London\",\n  \"country\": \"gb\",\n  \"page_size\": 20,\n  \"max_pages_per_source\": 2\n}" },
+            "url": { "raw": "{{baseUrl}}/api/adzuna/search", "host": ["{{baseUrl}}"], "path": ["api", "adzuna", "search"] }
+          }
+        },
+        {
+          "name": "Jooble Search",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"keywords\": [\"java\"],\n  \"location\": \"London\",\n  \"country\": \"gb\",\n  \"page_size\": 20,\n  \"max_pages_per_source\": 2\n}" },
+            "url": { "raw": "{{baseUrl}}/api/jooble/search", "host": ["{{baseUrl}}"], "path": ["api", "jooble", "search"] }
+          }
+        },
+        {
+          "name": "Greenhouse Search",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"keywords\": [\"software engineer\"],\n  \"location\": null,\n  \"remote\": null,\n  \"page_size\": 50,\n  \"max_pages_per_source\": 1\n}" },
+            "url": { "raw": "{{baseUrl}}/api/greenhouse/search", "host": ["{{baseUrl}}"], "path": ["api", "greenhouse", "search"] },
+            "description": "Searches every configured Greenhouse company board."
+          }
+        },
+        {
+          "name": "Lever Search",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"keywords\": [\"software engineer\"],\n  \"location\": null,\n  \"remote\": null,\n  \"page_size\": 50,\n  \"max_pages_per_source\": 1\n}" },
+            "url": { "raw": "{{baseUrl}}/api/lever/search", "host": ["{{baseUrl}}"], "path": ["api", "lever", "search"] },
+            "description": "Searches every configured Lever company site."
+          }
+        },
+        {
+          "name": "Ashby Search",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"keywords\": [\"software engineer\"],\n  \"location\": null,\n  \"remote\": null,\n  \"page_size\": 50,\n  \"max_pages_per_source\": 1\n}" },
+            "url": { "raw": "{{baseUrl}}/api/ashby/search", "host": ["{{baseUrl}}"], "path": ["api", "ashby", "search"] },
+            "description": "Searches every configured Ashby company board."
+          }
+        },
+        {
+          "name": "SmartRecruiters Search",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"keywords\": [\"software engineer\"],\n  \"location\": null,\n  \"remote\": null,\n  \"page_size\": 50,\n  \"max_pages_per_source\": 2\n}" },
+            "url": { "raw": "{{baseUrl}}/api/smartrecruiters/search", "host": ["{{baseUrl}}"], "path": ["api", "smartrecruiters", "search"] },
+            "description": "Searches every configured SmartRecruiters company account."
+          }
+        }
+      ]
+    },
+    {
+      "name": "LinkedIn Details",
+      "item": [
+        {
+          "name": "Fetch Job Descriptions",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"urls\": [\n    \"https://uk.linkedin.com/jobs/view/software-engineer-java-at-fanduel-4449566015\"\n  ]\n}"
+            },
+            "url": { "raw": "{{baseUrl}}/api/linkedin/job-descriptions", "host": ["{{baseUrl}}"], "path": ["api", "linkedin", "job-descriptions"] },
+            "description": "Fetches complete public detail data for up to 25 LinkedIn job URLs."
+          }
+        }
+      ]
+    },
+    {
+      "name": "Schedules",
+      "description": "Create Schedule automatically saves the returned ID into the collection-level scheduleId variable. Create examples are disabled by default to prevent an accidental recurring run.",
+      "item": [
+        {
+          "name": "Create Schedule",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (pm.response.code === 201) {",
+                  "  const schedule = pm.response.json();",
+                  "  pm.collectionVariables.set('scheduleId', schedule.id);",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Java sponsorship monitor\",\n  \"query\": {\n    \"keywords\": [\"java\"],\n    \"location\": \"United Kingdom\",\n    \"posted_within_days\": 7,\n    \"country\": \"gb\",\n    \"page_size\": 50\n  },\n  \"sources\": [\"linkedin-public\", \"sponsoredjobs\"],\n  \"max_pages_per_source\": 2,\n  \"interval\": \"30m\",\n  \"enabled\": false\n}"
+            },
+            "url": { "raw": "{{baseUrl}}/api/schedules", "host": ["{{baseUrl}}"], "path": ["api", "schedules"] }
+          }
+        },
+        {
+          "name": "List Schedules",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": { "raw": "{{baseUrl}}/api/schedules", "host": ["{{baseUrl}}"], "path": ["api", "schedules"] }
+          }
+        },
+        {
+          "name": "Get Schedule",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": { "raw": "{{baseUrl}}/api/schedules/{{scheduleId}}", "host": ["{{baseUrl}}"], "path": ["api", "schedules", "{{scheduleId}}"] }
+          }
+        },
+        {
+          "name": "Update Schedule",
+          "request": {
+            "method": "PATCH",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"enabled\": true,\n  \"interval\": \"1h\"\n}"
+            },
+            "url": { "raw": "{{baseUrl}}/api/schedules/{{scheduleId}}", "host": ["{{baseUrl}}"], "path": ["api", "schedules", "{{scheduleId}}"] }
+          }
+        },
+        {
+          "name": "Run Schedule Now",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": { "raw": "{{baseUrl}}/api/schedules/{{scheduleId}}/run-now", "host": ["{{baseUrl}}"], "path": ["api", "schedules", "{{scheduleId}}", "run-now"] }
+          }
+        },
+        {
+          "name": "Delete Schedule",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": { "raw": "{{baseUrl}}/api/schedules/{{scheduleId}}", "host": ["{{baseUrl}}"], "path": ["api", "schedules", "{{scheduleId}}"] }
+          }
+        }
+      ]
+    }
+  ]
+}
